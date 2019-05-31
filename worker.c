@@ -1,10 +1,13 @@
 #include <pthread.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <fcntl.h>
+#include <string.h>
 
 #include "worker.h"
 #include "util.h"
@@ -25,15 +28,30 @@ void print_ipv4(struct sockaddr *s)
     printf ("host %s:%d\n", ip, port);
 }
 
+int setnonblocking(int sockfd)
+{
+    if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFD, 0)|O_NONBLOCK) == -1) {
+        return -1;
+    }
+    return 0;
+}
 
-int handle_control_fd(int c_fd, int epollfd) {
+int add_event(int epollfd, int fd, int state) {
+    struct epoll_event ev;
+    ev.events = state;
+    ev.data.fd = fd;
+    return epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &ev);
+}
+
+
+int handle_control_fd(int c_fd, int epollfd, uint16_t port) {
     //
     int ret;
     char buf[BUFLEN];
     int listenfd;
 
     ControlContent cc;
-    struct sockaddr_in addr;
+    struct sockaddr_in addr, localaddr;
     int len = sizeof(addr);
 
 
@@ -62,20 +80,68 @@ int handle_control_fd(int c_fd, int epollfd) {
     //listen and connect with new fd
     listenfd = socket(PF_INET, SOCK_DGRAM, 0);
     int enable = 1;
-    if(setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0) {
-        perror("setsockopt");
+    if(setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0) {
+        perror("setsockopt so_reuseaddr");
         return -1;
     }
 
+    if(setsockopt(listenfd, SOL_SOCKET, SO_REUSEPORT, &enable, sizeof(int)) < 0) {
+        perror("setsockopt so_reuseport");
+        return -1;
+    }
+
+    //set nonblocking
+    setnonblocking(listenfd);
+
+    memset(&localaddr, 0, sizeof(localaddr));
+    localaddr.sin_family = PF_INET;
+    localaddr.sin_port = htons(port);
+    localaddr.sin_addr.s_addr = INADDR_ANY;
+    if(bind(listenfd, (struct sockaddr*)&localaddr, sizeof(struct sockaddr)) == -1) {
+        perror("bind");
+        return -1;
+
+    } else {
+        dlog("ip and port bind success\n");
+    }
+
+    //connect remote peer
+    if(connect(listenfd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
+        perror("connect");
+        return -1;
+    }
 
     //add epoll
-
+    if(add_event(epollfd, listenfd, EPOLLIN) == -1) {
+        perror("add event");
+        return -1;
+    }
 
     return ret;
 }
 
+int handle_transport_fd(int fd)
+{
+    //read dgram
+    char buf[BUFLEN];
+    memset(buf, 0, BUFLEN);
+
+    int ret = read(fd, &buf, sizeof(buf));
+
+
+    dlog("ret: %d\n", ret);
+
+    if(ret <= 0) {
+        return ret;
+    }
+
+    dlog("buf: %s\n", buf);
+
+    
+}
+
 //c_fd was socketpair
-int worker_func(int c_fd) 
+int worker_func(int c_fd, uint16_t port) 
 {
     int epollfd, nfds, n;
     struct epoll_event ev, events[MAX_EVENTS];
@@ -98,10 +164,11 @@ int worker_func(int c_fd)
     for(;;) {
         nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);
         for(n = 0; n < nfds; ++n) {
-            if(event[n].data.fd == c_fd) {
-                handle_control_fd(c_fd, epollfd);
+            if(events[n].data.fd == c_fd) {
+                handle_control_fd(c_fd, epollfd, port);
+
             } else {
-            
+                handle_transport_fd(events[n].data.fd);
             }
         }
     }

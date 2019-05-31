@@ -8,12 +8,12 @@ struct ControlContent {
     char data[256];
 };
 
-struct WorkerContext {
-    int c_fd;
-    int transport_fd[MAX_TRANSPORT_FDS];
-};
+//struct WorkerContext {
+//    int c_fd;
+//    int transport_fd[MAX_TRANSPORT_FDS];
+//};
 
-struct WorkerContext* init_worker_context();
+//struct WorkerContext* init_worker_context();
 
 
 #endif
