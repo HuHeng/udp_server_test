@@ -28,13 +28,6 @@ void print_ipv4(struct sockaddr *s)
     printf ("host %s:%d\n", ip, port);
 }
 
-int setnonblocking(int sockfd)
-{
-    if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFD, 0)|O_NONBLOCK) == -1) {
-        return -1;
-    }
-    return 0;
-}
 
 int add_event(int epollfd, int fd, int state) {
     struct epoll_event ev;
@@ -56,7 +49,7 @@ int handle_control_fd(int c_fd, int epollfd, uint16_t port) {
 
 
     //read dgram
-    ret = read(c_fd, &buf, sizeof(cc));
+    ret = recvfrom(c_fd, &buf, sizeof(cc));
 
     dlog("recv data length: %d, cc size: %ld\n", ret, sizeof(cc));
 

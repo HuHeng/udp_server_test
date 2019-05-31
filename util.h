@@ -7,4 +7,6 @@
 #define dlog(fmt, ...)  \
         fprintf(stderr, "file: %s, line: %d, " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__)
 
+int setnonblocking(int sockfd);
+
 #endif
