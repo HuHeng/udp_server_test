@@ -55,14 +55,14 @@ void handle_msg_from_client(void* data)
 
     //print
     memset(buf, 0, BUFLEN);
-    ret = recvfrom(fd, &buf, sizeof(buf), 0, &remote_addr, &addr_len);
+    ret = recvfrom(fd, &buf, sizeof(buf), 0, (struct sockaddr*)&remote_addr, &addr_len);
     if(ret <= 0) {
         perror("handle fd");
         dlog("read from remote peer: %d\n", ret);
         return;
     }
 
-    dlog("msg from remote %s:%d, %s", inet_ntoa(remote_addr.sin_addr), remote_addr.sin_port, buf);
+    dlog("msg from remote %s:%d, %s", inet_ntoa(remote_addr.sin_addr), ntohs(remote_addr.sin_port), buf);
 }
 
 void handle_msg_from_server(void* data)
@@ -104,8 +104,9 @@ void handle_msg_from_server(void* data)
     //add 
     ev.data.ptr = event_func;
     ev.events = EPOLLIN;
-    if(epoll_ctl(w->epollfd, EPOLL_CTL_ADD, w->cfd, &ev) == -1){
+    if(epoll_ctl(w->epollfd, EPOLL_CTL_ADD, listenfd, &ev) == -1){
         perror("epoll_ctl");
+        dlog("epoll_ctl failed\n");
         return;
     }
 }
@@ -116,6 +117,8 @@ void* thread_func(void* arg)
     int nfds, n;
     struct epoll_event ev, events[MAX_EVENTS];
     struct Worker* w = (struct Worker*)arg;
+
+    dlog("create worker\n");
 
     w->epollfd = epoll_create1(0);
     if(w->epollfd == -1) {
@@ -133,6 +136,7 @@ void* thread_func(void* arg)
     ev.events = EPOLLIN;
     if(epoll_ctl(w->epollfd, EPOLL_CTL_ADD, w->cfd, &ev) == -1){
         perror("epoll_ctl");
+        dlog("epoll_ctl failed\n");
         return NULL;
     }
 
@@ -171,7 +175,7 @@ struct Server* server_init(uint16_t port)
 
     //
     server = (struct Server*)malloc(sizeof(struct Server));
-    memset(&server, 0, sizeof(struct Server));
+    memset(server, 0, sizeof(struct Server));
     server->port = port;
 
     listenfd = create_udp_fd(server->port);
@@ -184,7 +188,7 @@ struct Server* server_init(uint16_t port)
     //create socketpair, create worker
 
     for(i = 0; i < WNUM; ++i) {
-        if(socketpair(AF_INET, SOCK_DGRAM, 0, server->cfd[i]) < 0){
+        if(socketpair(AF_UNIX, SOCK_DGRAM, 0, server->cfd[i]) < 0){
             perror("socketpair");
             dlog("create socketpair failed, i: %d\n", i);
             return NULL;
@@ -213,7 +217,7 @@ void server_handle_msg(void* data) {
     dlog("read fd: %d\n", server->listenfd);
     
     memset(buf, 0, BUFLEN);
-    ret = recvfrom(server->listenfd, &buf, sizeof(buf), 0, &remote_addr, &addr_len);
+    ret = recvfrom(server->listenfd, &buf, sizeof(buf), 0, (struct sockaddr*)&remote_addr, &addr_len);
     if(ret <= 0) {
         perror("handle fd");
         dlog("read from remote peer: %d\n", ret);
@@ -225,10 +229,10 @@ void server_handle_msg(void* data) {
     pkt.peer_addr = remote_addr;
 
     //post to client
-    dlog("remote port: %d\n", remote_addr.sin_port);
+    dlog("remote port: %d\n", ntohs(remote_addr.sin_port));
 
     //hash
-    index = remote_addr.sin_port % WNUM;
+    index = ntohs(remote_addr.sin_port) % WNUM;
 
     //post
     write(server->cfd[index][0], &pkt, sizeof(pkt));
