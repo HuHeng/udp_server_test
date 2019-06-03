@@ -49,7 +49,7 @@ void handle_msg_from_client(void* data)
 {
     struct sockaddr_in remote_addr;
     socklen_t addr_len = sizeof(struct sockaddr_in);
-    int fd = (int)data;
+    int fd = (unsigned long)data;
     int ret;
     char buf[BUFLEN];
 
@@ -99,7 +99,7 @@ void handle_msg_from_server(void* data)
     //add event
     struct EventFunc* event_func = (struct EventFunc*)malloc(sizeof(struct EventFunc));
     event_func->handle = handle_msg_from_client;
-    event_func->arg = (void*)listenfd;
+    event_func->arg = (void*)(unsigned long)listenfd;
 
     //add 
     ev.data.ptr = event_func;
