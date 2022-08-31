@@ -229,7 +229,7 @@ void server_handle_msg(void* data) {
     index = ntohs(remote_addr.sin_port) % WNUM;
 
     //post to client
-    dlog("main thread, msg from remote port: %d, hash to thread: %d, msg: %s", ntohs(remote_addr.sin_port), server->w[index]->id, buf);
+    dlog("main thread, msg from remote port: %d, msg: %s, hash to thread: %d", ntohs(remote_addr.sin_port), buf, server->w[index]->id);
 
     //post
     write(server->cfd[index][0], &pkt, sizeof(pkt));
