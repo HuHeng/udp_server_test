@@ -47,8 +47,6 @@ int create_udp_fd(uint16_t port)
         perror("bind");
         return -1;
 
-    } else {
-        dlog("ip and port bind success\n");
     }
     return listenfd;
 }

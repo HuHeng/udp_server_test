@@ -22,8 +22,8 @@ struct Packet {
 
 struct Worker {
     pthread_t t_id;
+    int id;
     int cfd; //control fd
-    //int listenfd;  //listenfd
     int epollfd;
     int processed_msg_num;
     uint16_t port;
@@ -31,7 +31,7 @@ struct Worker {
 
 struct Server {
     struct Worker* w[WNUM];
-    int   cfd[WNUM][2]; 
+    int cfd[WNUM][2];
     int listenfd;
     int epollfd;
     int processed_msg_num;
@@ -62,7 +62,7 @@ void handle_msg_from_client(void* data)
         return;
     }
 
-    dlog("msg from remote %s:%d, %s", inet_ntoa(remote_addr.sin_addr), ntohs(remote_addr.sin_port), buf);
+    dlog("msg from remote %s:%d, fd: %d, msg: %s", inet_ntoa(remote_addr.sin_addr), ntohs(remote_addr.sin_port), fd, buf);
 }
 
 void handle_msg_from_server(void* data)
@@ -79,10 +79,6 @@ void handle_msg_from_server(void* data)
         return;
     }
 
-    //get msg and remote addr
-
-    dlog("pkt.msg: %s", pkt.msg);
-
     listenfd = create_udp_fd(w->port);
     if(listenfd < 0) {
         dlog("create udp fd failed\n");
@@ -96,12 +92,15 @@ void handle_msg_from_server(void* data)
         return;
     }
 
+    //get msg and remote addr
+    dlog("thread id: %d, connect with remote addr, (fd: %d <---> remote_port: %d), msg from main thread, msg: %s", w->id, listenfd, ntohs(pkt.peer_addr.sin_port), pkt.msg);
+
     //add event
     struct EventFunc* event_func = (struct EventFunc*)malloc(sizeof(struct EventFunc));
     event_func->handle = handle_msg_from_client;
     event_func->arg = (void*)(unsigned long)listenfd;
 
-    //add 
+    //add
     ev.data.ptr = event_func;
     ev.events = EPOLLIN;
     if(epoll_ctl(w->epollfd, EPOLL_CTL_ADD, listenfd, &ev) == -1){
@@ -131,7 +130,7 @@ void* thread_func(void* arg)
     event_func->handle = handle_msg_from_server;
     event_func->arg = w;
 
-    //add 
+    //add
     ev.data.ptr = event_func;
     ev.events = EPOLLIN;
     if(epoll_ctl(w->epollfd, EPOLL_CTL_ADD, w->cfd, &ev) == -1){
@@ -151,7 +150,7 @@ void* thread_func(void* arg)
 }
 
 
-struct Worker* create_worker(int cfd, uint16_t port)
+struct Worker* create_worker(int cfd, uint16_t port, int id)
 {
     struct Worker *w = (struct Worker*)malloc(sizeof(struct Worker));
     int ret;
@@ -159,6 +158,7 @@ struct Worker* create_worker(int cfd, uint16_t port)
     memset(w, 0, sizeof(struct Worker));
     w->cfd = cfd;
     w->port = port;
+    w->id = id;
     ret = pthread_create(&w->t_id, NULL, thread_func, w);
     if(ret != 0) {
         dlog("pthread create error, ret: %d\n", ret);
@@ -167,7 +167,7 @@ struct Worker* create_worker(int cfd, uint16_t port)
     return w;
 }
 
-struct Server* server_init(uint16_t port) 
+struct Server* server_init(uint16_t port)
 {
     struct Server* server = NULL;
     int listenfd;
@@ -194,7 +194,7 @@ struct Server* server_init(uint16_t port)
             return NULL;
         }
 
-        server->w[i] = create_worker(server->cfd[i][1], server->port);
+        server->w[i] = create_worker(server->cfd[i][1], server->port, i);
         if(server->w[i] == NULL) {
             dlog("create worker failed, i: %d\n", i);
             return NULL;
@@ -214,8 +214,6 @@ void server_handle_msg(void* data) {
     struct sockaddr_in remote_addr;
     socklen_t addr_len = sizeof(struct sockaddr_in);
 
-    dlog("read fd: %d\n", server->listenfd);
-    
     memset(buf, 0, BUFLEN);
     ret = recvfrom(server->listenfd, &buf, sizeof(buf), 0, (struct sockaddr*)&remote_addr, &addr_len);
     if(ret <= 0) {
@@ -223,20 +221,18 @@ void server_handle_msg(void* data) {
         dlog("read from remote peer: %d\n", ret);
         return;
     }
-    dlog("msg: %s", buf);
 
     memcpy(pkt.msg, buf, BUFLEN);
     pkt.peer_addr = remote_addr;
 
-    //post to client
-    dlog("remote port: %d\n", ntohs(remote_addr.sin_port));
-
     //hash
     index = ntohs(remote_addr.sin_port) % WNUM;
 
+    //post to client
+    dlog("main thread, msg from remote port: %d, hash to thread: %d, msg: %s", ntohs(remote_addr.sin_port), server->w[index]->id, buf);
+
     //post
     write(server->cfd[index][0], &pkt, sizeof(pkt));
-
 }
 
 void server_run(struct Server* server)
@@ -255,7 +251,7 @@ void server_run(struct Server* server)
     event_func->handle = server_handle_msg;
     event_func->arg = server;
 
-    //add 
+    //add
     ev.data.ptr = event_func;
     ev.events = EPOLLIN;
     if(epoll_ctl(server->epollfd, EPOLL_CTL_ADD, server->listenfd, &ev) == -1){
